@@ -113,7 +113,7 @@ def run_openmvs_pipeline(sparse_dir: str, dense_dir: str, mesh_dir: str, options
     if os.path.exists(undistorted_src):
         shutil.copytree(undistorted_src, undistorted_dst, dirs_exist_ok=True)
         print(f"Copied undistorted images from {undistorted_src} to {undistorted_dst}")
-
+    
     # Stage 3: Mesh reconstruction
     print("Reconstructing mesh...")
     volumes = ["-v", f"{dense_abs}:{container_dense}",
@@ -126,33 +126,55 @@ def run_openmvs_pipeline(sparse_dir: str, dense_dir: str, mesh_dir: str, options
         "ReconstructMesh",
         "--working-folder", container_mesh,
         "--input-file", os.path.join(container_dense, "scene_dense.mvs"),
-        "--output-file", os.path.join(container_mesh, "scene_dense_mesh.mvs")
+        "--output-file", os.path.join(container_mesh, "scene_dense_mesh.mvs"),
+        "--export-type", "mvs"
     ]
     subprocess.run(cmd, check=True)
     
     # Stage 4: Mesh refinement
-    print("Refining mesh...")
-    volumes = ["-v", f"{mesh_abs}:{container_mesh}"]
-    if images_abs:
-        volumes.extend(["-v", f"{images_abs}:{container_images}"])
+    # print("Refining mesh...")
+    # volumes = ["-v", f"{mesh_abs}:{container_mesh}"]
+    # if images_abs:
+    #     volumes.extend(["-v", f"{images_abs}:{container_images}"])
     
+    # cmd = ["docker", "run", "--rm"] + volumes + [
+    #     openmvs_image,
+    #     "RefineMesh",
+    #     "--working-folder", container_mesh,
+    #     "--input-file", os.path.join(container_mesh, "scene_dense_mesh.mvs"),
+    #     "--max-face-area", str(options.get("max_face_area", 16))
+    # ]
+    # subprocess.run(cmd, check=True)
+    
+    # Stage 3.5: Create MVS scene with mesh for texturing
+    print("Preparing scene for texturing...")
+    volumes = ["-v", f"{dense_abs}:{container_dense}:ro",
+               "-v", f"{mesh_abs}:{container_mesh}"]
+    if images_abs:
+        volumes.extend(["-v", f"{images_abs}:{container_images}:ro"])
+
+        # Copy the dense scene and add the mesh to it
     cmd = ["docker", "run", "--rm"] + volumes + [
         openmvs_image,
-        "RefineMesh",
-        "--working-folder", container_mesh,
-        "--input-file", os.path.join(container_mesh, "scene_dense_mesh.mvs"),
-        "--max-face-area", str(options.get("max_face_area", 16)),
-        "--process-local-memory", "0"
+        "bash", "-c",
+        f"cp {container_dense}/scene_dense.mvs {container_mesh}/scene_mesh.mvs && "
+        f"echo 'Mesh copied to scene_mesh.mvs'"
     ]
     subprocess.run(cmd, check=True)
-    
-    # Stage 5: Texture mapping
+
+    # Stage 4: Texture mapping
     print("Applying textures...")
+    volumes = ["-v", f"{mesh_abs}:{container_mesh}"]
+    if images_abs:
+        volumes.extend(["-v", f"{images_abs}:{container_images}:ro"])
+
     cmd = ["docker", "run", "--rm"] + volumes + [
         openmvs_image,
         "TextureMesh",
         "--working-folder", container_mesh,
-        "--input-file", os.path.join(container_mesh, "scene_dense_mesh_refine.mvs"),
+        "--input-file", os.path.join(container_mesh, "scene_mesh.mvs"),
+        "--mesh-file", os.path.join(container_mesh, "scene_dense_mesh.ply"),
+        "--output-file", os.path.join(container_mesh, "scene_mesh_texture"),
         "--export-type", "obj"
     ]
     subprocess.run(cmd, check=True)
