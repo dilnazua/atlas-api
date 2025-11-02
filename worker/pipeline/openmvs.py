@@ -108,7 +108,7 @@ def run_openmvs_pipeline(sparse_dir: str, dense_dir: str, mesh_dir: str, options
     
     # Stage 3: Mesh reconstruction
     print("Reconstructing mesh...")
-    volumes = ["-v", f"{dense_abs}:{container_dense}:ro",
+    volumes = ["-v", f"{dense_abs}:{container_dense}",
                "-v", f"{mesh_abs}:{container_mesh}"]
     if images_abs:
         volumes.extend(["-v", f"{images_abs}:{container_images}:ro"])
