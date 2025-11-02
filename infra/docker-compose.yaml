@@ -1,0 +1,210 @@
+version: '3.8'
+
+services:
+  # Redis - Message broker and result backend for Celery
+  redis:
+    image: redis:7-alpine
+    container_name: atlas_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # FastAPI application server
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    container_name: atlas_api
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage:/data
+      - ../api:/app/api  # Mount for development
+      - ../worker:/app/worker  # Mount for development
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_ROOT=/data
+      - API_KEY=${API_KEY:-changeme_in_production}
+      - APP_ENV=${APP_ENV:-development}
+      - DEBUG=${DEBUG:-true}
+      - MAX_IMAGES=${MAX_IMAGES:-150}
+      - MIN_IMAGES=${MIN_IMAGES:-12}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-2048}
+      - ENABLE_SAM_SEGMENTATION=${ENABLE_SAM_SEGMENTATION:-true}
+      - PHOTOGRAMMETRY_QUALITY=${PHOTOGRAMMETRY_QUALITY:-medium}
+      - TARGET_TRIANGLE_COUNT=${TARGET_TRIANGLE_COUNT:-100000}
+      - MAX_TEXTURE_SIZE=${MAX_TEXTURE_SIZE:-2048}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-["*"]}
+      - CORS_ALLOW_CREDENTIALS=${CORS_ALLOW_CREDENTIALS:-true}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # Uses root .env automatically if present
+    profiles: ["dev"]
+
+  # Celery worker - Runs the photogrammetry pipeline
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    container_name: atlas_worker
+    command: celery -A worker.tasks worker --loglevel=info --concurrency=1
+    volumes:
+      - storage:/data
+      - ../worker:/app/worker  # Mount for development
+      # Mount Docker socket to allow running Docker containers (Docker-in-Docker)
+      # WARNING: This gives the container Docker daemon access - use with caution
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_ROOT=/data
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - APP_ENV=${APP_ENV:-development}
+      - ENABLE_SAM_SEGMENTATION=${ENABLE_SAM_SEGMENTATION:-true}
+      - PHOTOGRAMMETRY_QUALITY=${PHOTOGRAMMETRY_QUALITY:-medium}
+      - TARGET_TRIANGLE_COUNT=${TARGET_TRIANGLE_COUNT:-100000}
+      - MAX_TEXTURE_SIZE=${MAX_TEXTURE_SIZE:-2048}
+      - OPENMVG_DOCKER_IMAGE=${OPENMVG_DOCKER_IMAGE:-openmvg/openmvg:latest}
+      - OPENMVS_DOCKER_IMAGE=${OPENMVS_DOCKER_IMAGE:-openmvs/openmvs:latest}
+    depends_on:
+      - redis
+      - api
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # NGINX reverse proxy (for production TLS, rate limiting, chunked uploads)
+  nginx:
+    image: nginx:alpine
+    container_name: atlas_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro  # Mount SSL certificates here
+      - storage:/data  # Access to uploads
+    depends_on:
+      - api
+    restart: unless-stopped
+    # Uses root .env automatically if present
+    profiles: ["prod"]
+
+  # Production API/worker definitions without bind mounts
+  api_prod:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    container_name: atlas_api_prod
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage:/data
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_ROOT=/data
+      - APP_ENV=${APP_ENV:-production}
+      - API_KEY=${API_KEY}
+      - DEBUG=${DEBUG:-false}
+      - MAX_IMAGES=${MAX_IMAGES:-150}
+      - MIN_IMAGES=${MIN_IMAGES:-12}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-2048}
+      - ENABLE_SAM_SEGMENTATION=${ENABLE_SAM_SEGMENTATION:-true}
+      - PHOTOGRAMMETRY_QUALITY=${PHOTOGRAMMETRY_QUALITY:-medium}
+      - TARGET_TRIANGLE_COUNT=${TARGET_TRIANGLE_COUNT:-100000}
+      - MAX_TEXTURE_SIZE=${MAX_TEXTURE_SIZE:-2048}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS}
+      - CORS_ALLOW_CREDENTIALS=${CORS_ALLOW_CREDENTIALS:-true}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # Uses root .env automatically if present
+    profiles: ["prod"]
+
+  worker_prod:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    container_name: atlas_worker_prod
+    command: celery -A worker.tasks worker --loglevel=info --concurrency=1
+    volumes:
+      - storage:/data
+      # Mount Docker socket to allow running Docker containers (Docker-in-Docker)
+      # WARNING: This gives the container Docker daemon access - use with caution
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_ROOT=/data
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - APP_ENV=${APP_ENV:-production}
+      - ENABLE_SAM_SEGMENTATION=${ENABLE_SAM_SEGMENTATION:-true}
+      - PHOTOGRAMMETRY_QUALITY=${PHOTOGRAMMETRY_QUALITY:-medium}
+      - TARGET_TRIANGLE_COUNT=${TARGET_TRIANGLE_COUNT:-100000}
+      - MAX_TEXTURE_SIZE=${MAX_TEXTURE_SIZE:-2048}
+      - OPENMVG_DOCKER_IMAGE=${OPENMVG_DOCKER_IMAGE:-openmvg/openmvg:latest}
+      - OPENMVS_DOCKER_IMAGE=${OPENMVS_DOCKER_IMAGE:-openmvs/openmvs:latest}
+    depends_on:
+      - redis
+      - api_prod
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    # Uses root .env automatically if present
+    profiles: ["prod"]
+
+  # Celery beat for scheduled tasks (cleanup, etc.)
+  beat:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    container_name: atlas_beat
+    command: celery -A worker.tasks beat --loglevel=info
+    volumes:
+      - storage:/data
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - STORAGE_ROOT=/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+  storage:
+    driver: local
