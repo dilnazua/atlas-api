@@ -105,7 +105,15 @@ def run_openmvs_pipeline(sparse_dir: str, dense_dir: str, mesh_dir: str, options
         "--resolution-level", str(resolution_level)
     ]
     subprocess.run(cmd, check=True)
-    
+
+    # Copy undistorted images to mesh directory for ReconstructMesh
+    import shutil
+    undistorted_src = os.path.join(dense_dir, "undistorted")
+    undistorted_dst = os.path.join(mesh_dir, "undistorted")
+    if os.path.exists(undistorted_src):
+        shutil.copytree(undistorted_src, undistorted_dst, dirs_exist_ok=True)
+        print(f"Copied undistorted images from {undistorted_src} to {undistorted_dst}")
+
     # Stage 3: Mesh reconstruction
     print("Reconstructing mesh...")
     volumes = ["-v", f"{dense_abs}:{container_dense}",
