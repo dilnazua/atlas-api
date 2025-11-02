@@ -74,10 +74,10 @@ def run_openmvs_pipeline(sparse_dir: str, dense_dir: str, mesh_dir: str, options
     if not os.path.exists(sfm_data_json):
         raise RuntimeError(f"No sfm_data found in {reconstruction_dir}")
     
-    volumes = ["-v", f"{sparse_abs}:{container_sparse}:ro",
+    volumes = ["-v", f"{sparse_abs}:{container_sparse}",
                "-v", f"{dense_abs}:{container_dense}"]
     if images_abs:
-        volumes.extend(["-v", f"{images_abs}:{container_images}:ro"])
+        volumes.extend(["-v", f"{images_abs}:{container_images}"])
     
     cmd = ["docker", "run", "--rm"] + volumes + [
         openmvg_image,
@@ -94,7 +94,7 @@ def run_openmvs_pipeline(sparse_dir: str, dense_dir: str, mesh_dir: str, options
     volumes = ["-v", f"{dense_abs}:{container_dense}",
                "-v", f"{mesh_abs}:{container_mesh}"]
     if images_abs:
-        volumes.extend(["-v", f"{images_abs}:{container_images}:ro"])
+        volumes.extend(["-v", f"{images_abs}:{container_images}"])
     
     resolution_level = options.get("resolution_level", 1)
     cmd = ["docker", "run", "--rm"] + volumes + [
@@ -111,7 +111,7 @@ def run_openmvs_pipeline(sparse_dir: str, dense_dir: str, mesh_dir: str, options
     volumes = ["-v", f"{dense_abs}:{container_dense}",
                "-v", f"{mesh_abs}:{container_mesh}"]
     if images_abs:
-        volumes.extend(["-v", f"{images_abs}:{container_images}:ro"])
+        volumes.extend(["-v", f"{images_abs}:{container_images}"])
     
     cmd = ["docker", "run", "--rm"] + volumes + [
         openmvs_image,
@@ -126,7 +126,7 @@ def run_openmvs_pipeline(sparse_dir: str, dense_dir: str, mesh_dir: str, options
     print("Refining mesh...")
     volumes = ["-v", f"{mesh_abs}:{container_mesh}"]
     if images_abs:
-        volumes.extend(["-v", f"{images_abs}:{container_images}:ro"])
+        volumes.extend(["-v", f"{images_abs}:{container_images}"])
     
     cmd = ["docker", "run", "--rm"] + volumes + [
         openmvs_image,
@@ -160,4 +160,3 @@ def run_openmvs_pipeline(sparse_dir: str, dense_dir: str, mesh_dir: str, options
         json.dump(summary, f, indent=2)
     
     print("OpenMVS pipeline complete")
-
