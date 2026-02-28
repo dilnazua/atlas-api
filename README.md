@@ -203,7 +203,7 @@ docker-compose -f infra/docker-compose.yaml down
 
 ### Testing
 
-See [docs/RUNNING_AND_TESTING.md](docs/RUNNING_AND_TESTING.md) for detailed testing instructions.
+
 
 ### DigitalOcean Deployment
 
